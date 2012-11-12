@@ -1,0 +1,134 @@
+#!/usr/bin/env perl
+use utf8;
+use strict;
+use warnings;
+use Cwd;
+use Data::Section::Simple qw(get_data_section);
+use Text::Xslate;
+use File::Slurp;
+
+if (@ARGV < 2) {
+    print "Usage: $0 <AUTHOR> <TITLE>\n";
+    exit;
+}
+
+run(@ARGV);
+
+sub run {
+    my ($author, $title) = @_;
+
+    my $dir = getcwd;
+    chdir $dir;
+
+    makeebooks($author, $title);
+    makefigures($author, $title);
+    makelangdir('ko');
+    makecover('');
+}
+
+sub makeebooks {
+    my ($author, $title) = @_;
+
+    $title  =~ s/ /-/g;
+
+    my $content = get_data_section('makeebooks');
+
+    my $tx = Text::Xslate->new;
+    my $script = $tx->render_string($content, {
+        title  => $title,
+        author => $author,
+    });
+
+    my $makeebooks = './makeebooks';
+    write_file($makeebooks, { binmode => ':utf8' }, $script);
+    chmod 0755, $makeebooks;
+}
+
+sub makefigures {
+    my ($author, $title) = @_;
+    mkdir 'figures';
+}
+
+sub makelangdir {
+    my $lang = shift;
+    mkdir "$lang";
+}
+
+sub makecover {
+    my $path = shift;
+}
+
+__DATA__
+
+@@ makeebooks
+
+#!/usr/bin/env ruby
+# encoding: utf-8
+# This script convers markdown book to one of the serveral e-book
+# formats supported with calibre (http://calibre-ebook.com)
+#
+# Samples:
+#
+# Build e-book for amazon kindle for english and russian languages
+# 	$ ruby makeebooks en ru
+# or
+# 	$ FORMAT=mobi ruby makeebooks en ru
+#
+# Build e-book in 'epub' format for russian only
+# 	$ FORMAT=epub ruby makeebooks ru
+
+require 'rubygems'
+require 'rdiscount'
+
+if ARGV.length == 0
+  puts "you need to specify at least one language. For example: makeebooks en"
+  exit
+end
+
+format = ENV['FORMAT'] || 'mobi'
+puts "using .#{format} (you can change it via FORMAT environment variable. try 'mobi' or 'epub')"
+
+ARGV.each do |lang|
+  puts "convert content for '#{lang}' language"
+
+  if lang == 'ko'
+    figure_title = '그림'
+  elsif lang == 'ja'
+    figure_title = '図'
+  elsif lang == 'ru'
+    figure_title = 'Рисунок'
+  elsif lang == 'es'
+    figure_title = 'Figura'
+  elsif lang == 'zh'
+    figure_title = '图'
+  elsif lang == 'zh-tw'
+    figure_title = '圖'
+  elsif lang == 'pt-br'
+    figure_title = 'Figura'
+  else
+    figure_title = 'Figure'
+  end
+
+  book_content = %(<html xmlns="http://www.w3.org/1999/xhtml"><head><title><: $title :></title></head><body>)
+  dir = File.expand_path(File.join(File.dirname(__FILE__), lang))
+  Dir[File.join(dir, '**', '*.md')].sort.each do |input|
+    puts "processing #{input}"
+    content = File.read(input)
+    content.gsub!(/Insert\s+(.*)(\.(?:png|jpg))\s*\n?\s*#{figure_title}\s*(.*)/, '![\3](figures/\1\2 "\3")')
+    book_content << RDiscount.new(content).to_html
+  end
+  book_content << "</body></html>"
+
+  File.open("$title.#{lang}.html", 'w') do |output|
+    output.write(book_content)
+  end
+
+  system('ebook-convert', "<: $title :>.#{lang}.html", "<: $title :>.#{lang}.#{format}",
+         '--cover', 'cover.png',
+         '--authors', '<: $author :>',
+         '--comments', "licensed under the Creative Commons Attribution-Non Commercial-Share Alike 3.0 license", # should to fix
+         '--level1-toc', '//h:h1',
+         '--level2-toc', '//h:h2',
+         '--level3-toc', '//h:h3',
+         '--language', lang)
+end
